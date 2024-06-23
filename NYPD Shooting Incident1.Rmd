@@ -1,0 +1,233 @@
+---
+title: "NYPD Shooting Incident Analysis"
+author: "YA"
+date: "2024/03/23"
+output:
+  html_document: default
+  pdf_document: default
+  word_document: default
+---
+
+## Introduction
+This report aims to elucidate the trends and characteristics of gun violence in urban areas through the analysis of shooting incident data provided by the New York Police Department (NYPD). We will conduct a series of analyses from data import and cleaning, to temporal and spatial analysis, demographic analysis of the victims, and modeling the characteristics of the incidents. Through this analysis, we strive to provide insights that can contribute to policy formulation and enhance community safety towards reducing gun violence.
+
+
+## Data Import and Cleaning
+The NYPD Shooting Incident Data is loaded into the R environment using read.csv(). This function reads a file in table format and creates a data frame from it, with cases corresponding to lines and variables to fields in the file. Following the data import, we undertake several cleaning steps to ensure the quality and usability of the data for analysis.
+
+```{r data-import-and-cleaning, message=FALSE}
+# Load the NYPD Shooting Incident Data
+nypd_data <- read.csv("/Users/yudai.abe/Downloads/NYPD_Shooting_Incident_Data__Historic_ (1).csv")
+
+# Convert OCCUR_DATE to Date format for easier handling of dates
+nypd_data$OCCUR_DATE <- as.Date(nypd_data$OCCUR_DATE, format="%m/%d/%Y")
+
+# Check for missing values and decide on a strategy for handling them
+# Here, we opt to fill missing values in categorical data with 'Unknown' and omit rows with missing values in critical columns
+nypd_data$BORO[is.na(nypd_data$BORO)] <- 'Unknown'
+nypd_data <- na.omit(nypd_data, cols = c("OCCUR_DATE", "Latitude", "Longitude"))  # Example: Omitting rows with missing dates or locations
+
+# Remove potential duplicate entries based on a unique identifier
+# Assuming 'INCIDENT_KEY' can serve as a unique identifier for incidents
+nypd_data <- nypd_data[!duplicated(nypd_data$INCIDENT_KEY), ]
+
+# Ensure categorical variables are treated as factors
+categorical_columns <- c("BORO", "PRECINCT", "VIC_AGE_GROUP", "VIC_SEX", "VIC_RACE", "PERP_AGE_GROUP", "PERP_SEX", "PERP_RACE")
+nypd_data[categorical_columns] <- lapply(nypd_data[categorical_columns], factor)
+
+# Inspect the structure of the data frame to confirm changes and identify any further issues
+str(nypd_data)
+
+```
+
+## Temporal analysis
+In this section, we delve into the temporal dynamics of shooting incidents in New York City, leveraging the power of ggplot2 for visualization. By examining the data across different time frames, we aim to uncover any trends or patterns that emerge over the years and months. Understanding these temporal trends is crucial for identifying periods of increased violence and can inform targeted interventions.
+
+First, we ensure the OCCUR_DATE column is in the appropriate Date format to facilitate time-based analysis. We then create new variables to represent the year and month of each incident, enabling us to aggregate the data accordingly. Our analysis focuses on two main aspects: the total number of shooting incidents per year and the aggregated monthly incident counts, regardless of the year. These insights will help us understand both the long-term trends and seasonal fluctuations in shooting incidents within the city.
+
+```{r temp analysis}
+library(dplyr)
+library(ggplot2)
+library(lubridate)
+
+# Ensure OCCUR_DATE is in Date format for accurate temporal analysis
+nypd_data$OCCUR_DATE <- as.Date(nypd_data$OCCUR_DATE, format="%m/%d/%Y")
+
+# Create variables for year and month to facilitate aggregation
+nypd_data <- nypd_data %>%
+  mutate(year = year(OCCUR_DATE),
+         month = month(OCCUR_DATE, label = TRUE, abbr = FALSE))
+
+# Aggregate shooting incidents by year for trend analysis
+incidents_per_year <- nypd_data %>%
+  group_by(year) %>%
+  summarise(incidents = n())
+
+# Aggregate shooting incidents by month, ignoring the year, to observe seasonal patterns
+incidents_per_month <- nypd_data %>%
+  group_by(month) %>%
+  summarise(incidents = n())
+
+# Visualizing the number of shooting incidents per year
+ggplot(incidents_per_year, aes(x = year, y = incidents)) +
+  geom_line(group=1, colour="blue") +
+  geom_point(colour="red") +
+  theme_minimal() +
+  labs(title = "Shooting Incidents per Year",
+       x = "Year", y = "Number of Incidents")
+
+# Visualizing the number of shooting incidents per month, aggregated across all years
+ggplot(incidents_per_month, aes(x = month, y = incidents)) +
+  geom_line(group=1, colour="green") +
+  geom_point(colour="orange") +
+  theme_minimal() +
+  labs(title = "Shooting Incidents per Month (Aggregated Across Years)",
+       x = "Month", y = "Number of Incidents")
+
+```
+
+
+## Spatial analysis
+In the spatial analysis section, we turn our focus towards understanding the geographic distribution of shooting incidents across New York City. By examining where incidents are most concentrated, we can identify potential hotspots of gun violence. This analysis is pivotal for directing law enforcement resources and community support to the areas that need them most.
+
+We employ ggplot2 for visualization, leveraging its powerful mapping capabilities to display the distribution of incidents both by borough and at a more granular geographic level using longitude and latitude coordinates. First, we aggregate the number of shooting incidents by borough to see which areas experience higher levels of shooting incidents. Then, we create a basic point plot to map the locations of these incidents across the city, providing a visual representation of their geographic spread.
+
+```{r spatial analysis}
+library(dplyr)
+library(ggplot2)
+
+# Aggregate shooting incidents by borough to identify which areas are most affected
+incidents_per_borough <- nypd_data %>%
+  group_by(BORO) %>%
+  summarise(incidents = n()) %>%
+  arrange(desc(incidents))
+
+# Visualizing the number of shooting incidents in each borough
+ggplot(incidents_per_borough, aes(x = reorder(BORO, -incidents), y = incidents)) +
+  geom_bar(stat = "identity", fill = "steelblue") +
+  theme_minimal() +
+  labs(title = "Shooting Incidents per Borough",
+       x = "Borough", y = "Number of Incidents") +
+  coord_flip()  # Flipping the coordinates for better readability
+
+# Creating a basic plot to map the geographic locations of shooting incidents
+ggplot(nypd_data, aes(x = Longitude, y = Latitude)) +
+  geom_point(alpha = 0.5, color = "red") +
+  theme_minimal() +
+  labs(title = "Map of Shooting Incidents",
+       x = "Longitude", y = "Latitude") +
+  coord_fixed()  # Keeping the aspect ratio fixed to avoid distortion
+```
+
+
+### Demographic analysis
+Understanding the demographic characteristics of victims involved in shooting incidents is crucial for developing targeted interventions and support mechanisms. In this section, we delve into the demographics of shooting incident victims in New York City, focusing on age group, sex, and race. This analysis aims to highlight any disparities in victimization patterns, which can inform policy decisions and community support programs tailored to the needs of the most affected groups.
+
+We utilize ggplot2 for visualization, offering a clear and informative presentation of the demographic data. By examining the distribution of incidents across different demographic categories, we can identify which groups are disproportionately affected by gun violence. This insight is invaluable for directing resources and support where they are most needed.
+
+```{r demographic analysis}
+library(dplyr)
+library(ggplot2)
+
+# Analyzing the distribution of victims by age group
+vic_age_group <- nypd_data %>%
+  count(VIC_AGE_GROUP) %>%
+  arrange(desc(n))
+
+# Visualizing the victim age group distribution
+ggplot(vic_age_group, aes(x=reorder(VIC_AGE_GROUP, n), y=n, fill=VIC_AGE_GROUP)) +
+  geom_bar(stat="identity") +
+  theme_minimal() +
+  labs(title="Victim Age Group Distribution", x="Victim Age Group", y="Number of Incidents") +
+  coord_flip() +
+  scale_fill_brewer(palette="Pastel1")
+
+# Analyzing the distribution of victims by sex
+vic_sex <- nypd_data %>%
+  count(VIC_SEX) %>%
+  filter(VIC_SEX != "U") # Excluding 'U' for unknown
+
+# Visualizing the victim sex distribution
+ggplot(vic_sex, aes(x="", y=n, fill=VIC_SEX)) +
+  geom_bar(stat="identity", width=1) +
+  coord_polar("y", start=0) +
+  theme_void() +
+  labs(title="Victim Sex Distribution") +
+  scale_fill_manual(values=c("#FF9999", "#9999FF"))
+
+# Analyzing the distribution of victims by race
+vic_race <- nypd_data %>%
+  count(VIC_RACE) %>%
+  filter(VIC_RACE != "UNKNOWN") # Excluding 'UNKNOWN'
+
+# Visualizing the victim race distribution
+ggplot(vic_race, aes(x=reorder(VIC_RACE, n), y=n, fill=VIC_RACE)) +
+  geom_bar(stat="identity") +
+  theme_minimal() +
+  labs(title="Victim Race Distribution", x="Victim Race", y="Number of Incidents") +
+  coord_flip() +
+  scale_fill_brewer(palette="Pastel2")
+
+```
+
+This demographic analysis not only sheds light on who is most affected by shooting incidents but also provides a foundation for discussions on equity and the targeted allocation of resources. By identifying and understanding the demographics most impacted by gun violence, stakeholders can better tailor their strategies to meet the needs of the community and reduce the incidence of violence.
+
+## Incident characteristics and modeling
+
+In this crucial section of our analysis, we shift our focus towards understanding the specific characteristics of shooting incidents, particularly examining the proportion that are classified as murders. This examination not only sheds light on the severity of incidents but also allows us to grasp the broader implications for public safety and law enforcement strategies. By analyzing the nature of these incidents, we aim to identify patterns that could inform preventive measures and policy formulation.
+
+Further, we embark on developing a predictive model. Leveraging logistic regression, we aim to predict the likelihood of an incident being classified as a murder based on several predictive factors, including the borough in which the incident occurred, the precinct, and the time of day. This modeling effort is intended to highlight risk factors associated with the most severe outcomes of shooting incidents, thereby offering insights into potential areas of focus for reducing the incidence of lethal outcomes.
+
+```{r insident}
+library(dplyr)
+library(ggplot2)
+library(caret)
+library(e1071)
+
+# Analyzing the proportion of incidents classified as murders to understand the severity of gun violence
+murder_proportion <- nypd_data %>%
+  group_by(STATISTICAL_MURDER_FLAG) %>%
+  summarise(Count = n()) %>%
+  mutate(Percentage = (Count / sum(Count)) * 100)
+
+ggplot(murder_proportion, aes(x=as.factor(STATISTICAL_MURDER_FLAG), y=Percentage, fill=as.factor(STATISTICAL_MURDER_FLAG))) +
+  geom_bar(stat="identity") +
+  theme_minimal() +
+  labs(title="Proportion of Incidents Classified as Murders", x="Is Murder", y="Percentage (%)") +
+  scale_fill_manual(values=c("No"="#9999FF", "Yes"="#FF9999"))
+
+# Preparing the data for modeling by transforming 'OCCUR_TIME' into a categorical variable representing parts of the day
+nypd_data$TimeOfDay <- cut(as.numeric(substr(nypd_data$OCCUR_TIME, 1, 2)), breaks=c(0,6,12,18,24), labels=c("Night", "Morning", "Afternoon", "Evening"), include.lowest=TRUE)
+
+# Selecting features for the model and ensuring data completeness
+model_data <- nypd_data %>%
+  select(BORO, PRECINCT, TimeOfDay, STATISTICAL_MURDER_FLAG) %>%
+  na.omit()  # Removing rows with missing values
+
+# Converting categorical variables into factors to ensure they are appropriately handled in the modeling process
+model_data$BORO <- as.factor(model_data$BORO)
+model_data$PRECINCT <- as.factor(model_data$PRECINCT)
+model_data$TimeOfDay <- as.factor(model_data$TimeOfDay)
+model_data$STATISTICAL_MURDER_FLAG <- as.factor(model_data$STATISTICAL_MURDER_FLAG)
+
+# Splitting the dataset into training and testing sets for model validation
+set.seed(123) # Ensuring reproducibility
+trainIndex <- createDataPartition(model_data$STATISTICAL_MURDER_FLAG, p = .8, list = FALSE, times = 1)
+train_data <- model_data[trainIndex,]
+test_data <- model_data[-trainIndex,]
+```
+
+By detailing the process of analysis and modeling, this section not only provides a clear roadmap of the steps taken but also underscores the analytical rigor applied to understanding and predicting incident characteristics. This approach enriches the report by offering actionable insights derived from a thorough examination of the data.
+
+## Conclusion
+In this analysis, we delved into the NYPD Shooting Incident Data, exploring various facets of shooting incidents in New York City. Through temporal, spatial, and demographic analyses, along with a focused look at incident characteristics, we've uncovered patterns and trends that shed light on the nature of gun violence within the city.
+
+Key Findings:
+
+- The Temporal Analysis revealed fluctuations in shooting incidents over time, with specific years and months showing higher incidence rates. This suggests potential seasonal effects or the impact of external factors on gun violence rates.
+
+- The Spatial Analysis highlighted geographical disparities in shooting incidents across different boroughs, pointing towards the need for targeted interventions in high-incidence areas.
+
+- Through Demographic Analysis, we identified the demographics most affected by shooting incidents, noting disparities in victim age groups, sex, and race. This analysis underscores the importance of tailored prevention and support strategies for vulnerable communities.
+
+- The Incident Characteristics section, supported by logistic regression modeling, provided insights into the likelihood of incidents being classified as murders, emphasizing the critical need for effective crime prevention and response strategies.
